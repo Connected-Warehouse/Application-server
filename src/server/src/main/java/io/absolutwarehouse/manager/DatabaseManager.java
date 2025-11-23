@@ -27,7 +27,7 @@ public class DatabaseManager {
 
             connection = DriverManager.getConnection(
                     url,
-                    ServerConfig.DB_NAME,
+                    ServerConfig.DB_USERNAME,
                     ServerConfig.DB_PASSWORD
             );
 
@@ -196,4 +196,51 @@ public class DatabaseManager {
         System.out.println("[SQL] " + sql);
         return stmt.executeUpdate();
     }
+
+
+    public long insertAndGetId(String table, Map<String, Object> values, String idColumn) throws SQLException {
+        StringJoiner cols = new StringJoiner(", ");
+        StringJoiner qs = new StringJoiner(", ");
+        for (String c : values.keySet()) {
+            cols.add(c);
+            qs.add("?");
+        }
+
+        String sql = "INSERT INTO " + table + " (" + cols + ") VALUES (" + qs + ") RETURNING " + idColumn;
+        PreparedStatement stmt = connection.prepareStatement(sql);
+
+        int i = 1;
+        for (Object v : values.values()) stmt.setObject(i++, v);
+
+        System.out.println("[SQL] " + sql);
+
+        ResultSet rs = stmt.executeQuery();
+        if (rs.next()) {
+            long id = rs.getLong(1);
+            rs.close();
+            stmt.close();
+            return id;
+        } else {
+            rs.close();
+            stmt.close();
+            throw new SQLException("Impossible de récupérer l'ID généré");
+        }
+    }
+
+
+
+    public static void close(ResultSet rs, Statement stmt) {
+        try {
+            if (rs != null) rs.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        try {
+            if (stmt != null) stmt.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+
 }

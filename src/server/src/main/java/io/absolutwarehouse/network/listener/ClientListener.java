@@ -1,10 +1,10 @@
 package io.absolutwarehouse.network.listener;
 
-import java.net.Socket;
+import io.absolutwarehouse.network.Client;
 
 public interface ClientListener {
-    void onClientDisconnected(Socket clientSocket);
-    void onClientConnected(Socket clientSocket);
-    void onReceived(Socket clientSocket, String message);
+    void onClientDisconnected(Client client);
+    void onClientConnected(Client client);
+    void onReceived(Client client, String message);
     void onError(Exception e);
 }

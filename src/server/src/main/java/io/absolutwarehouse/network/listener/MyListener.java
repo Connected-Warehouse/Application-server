@@ -1,32 +1,31 @@
 package io.absolutwarehouse.network.listener;
 
 import io.absolutwarehouse.manager.ClientManager;
-
-import java.net.Socket;
+import io.absolutwarehouse.network.Client;
 
 public class MyListener implements ClientListener {
 
     @Override
-    public void onClientConnected(Socket clientSocket) {
-        System.out.println("Client connected : " + clientSocket.getInetAddress());
+    public void onClientConnected(Client client) {
+        System.out.println("Client connected : " + client.getSocket().getInetAddress());
     }
 
     @Override
-    public void onReceived(Socket clientSocket, String message) {
-        System.out.println("Message received from " + clientSocket.getInetAddress() + " : " + message);
-        ClientManager.handleMessage(clientSocket, message);
+    public void onReceived(Client client, String message) {
+        System.out.println("Message received from " + client.getSocket().getInetAddress() + " : " + message);
+        ClientManager.getInstance().handleMessage(client, message);
     }
 
     @Override
-    public void onClientDisconnected(Socket clientSocket) {
-        System.out.println("Client disconnected : " + clientSocket.getInetAddress());
-        ClientManager.getInstance().resetEtape();
+    public void onClientDisconnected(Client client) {
+        System.out.println("Client disconnected : " + client.getSocket().getInetAddress());
+        client.setConnected(false);  // met à jour l’état du client
+        ClientManager.getInstance().resetEtape(client);
     }
 
     @Override
     public void onError(Exception e) {
         System.err.println("Error : " + e.getMessage());
-        ClientManager.getInstance().resetEtape();
         e.printStackTrace();
     }
 }

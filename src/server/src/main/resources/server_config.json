@@ -1,0 +1,8 @@
+{
+  "actions": {
+    "ADD": ["-W", "RW"],
+    "MODIFY": ["-W", "RW"],
+    "DELETE": ["-W", "RW"],
+    "READ": ["R-", "RW"]
+  }
+}
