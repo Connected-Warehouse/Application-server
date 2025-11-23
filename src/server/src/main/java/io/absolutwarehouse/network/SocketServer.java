@@ -4,11 +4,9 @@ import io.absolutwarehouse.config.ServerConfig;
 import io.absolutwarehouse.manager.DatabaseManager;
 import io.absolutwarehouse.network.listener.ClientListener;
 
-import java.io.BufferedReader;
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 
 /**
@@ -97,13 +95,29 @@ public class SocketServer implements Runnable {
 
     private void handleClient(Client client) {
         Socket socket = client.getSocket();
-        try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+        try {
             inetSocketConnection(socket);
-            String msg;
-            while ((msg = in.readLine()) != null) {
-                client.updateLastRequest();
-                System.out.println("[RECEIVED] From " + socket.getInetAddress() + ": " + msg);
-                if (listener != null) listener.onReceived(client, msg);
+
+            InputStream in = socket.getInputStream();
+            byte[] buffer = new byte[ServerConfig.MAX_BUFFER_SIZE + 1];
+            int pos = 0;
+            int b;
+
+            while ((b = in.read()) != -1) {
+                if (b == '\n') { // fin de message
+                    String msg = new String(buffer, 0, pos, StandardCharsets.UTF_8);
+                    pos = 0;
+
+                    client.updateLastRequest();
+                    System.out.println("[RECEIVED] From " + socket.getInetAddress() + ": " + msg);
+
+                    if (listener != null) listener.onReceived(client, msg);
+                } else {
+                    if (pos >= ServerConfig.MAX_BUFFER_SIZE) {
+                        throw new IOException("Message trop long");
+                    }
+                    buffer[pos++] = (byte) b;
+                }
             }
         } catch (IOException e) {
             handleClientException(client, e);
@@ -116,6 +130,7 @@ public class SocketServer implements Runnable {
             System.out.println("[INFO] Client " + socket.getInetAddress() + " connection closed.");
         }
     }
+
 
     private void handleClientException(Client client, IOException e) {
         Socket socket = client.getSocket();
