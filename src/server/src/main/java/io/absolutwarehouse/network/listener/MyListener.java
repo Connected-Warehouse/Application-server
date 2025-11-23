@@ -25,7 +25,6 @@ public class MyListener implements ClientListener {
 
     @Override
     public void onError(Exception e) {
-        System.err.println("Error : " + e.getMessage());
-        e.printStackTrace();
+        System.out.println("[Error] " + e.getMessage());
     }
 }

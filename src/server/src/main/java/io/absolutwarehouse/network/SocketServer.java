@@ -160,7 +160,9 @@ public class SocketServer implements Runnable {
 
         try {
             socket.close();
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+
+        }
     }
 
     private void inetSocketConnection(Socket socket) throws SocketException {
