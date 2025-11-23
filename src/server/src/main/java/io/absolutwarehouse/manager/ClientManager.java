@@ -41,7 +41,6 @@ public class ClientManager {
     public void handleMessage(Client client, String message) {
         if (message == null || !client.isConnected()) return;
 
-        // Log du message entier en une seule ligne
         String compactMessage = message.replace("\n", "\\n");
         System.out.println("[RECEIVED] " + compactMessage);
 
@@ -56,44 +55,25 @@ public class ClientManager {
 
         switch (action) {
             case "DISCONNECT":
-                System.out.println("[INFO] Client " + client.getSocket().getInetAddress() + " requested disconnect.");
                 disconnectClient(client, "You have been disconnected.");
                 break;
-
             case "INFO":
-                System.out.println("[INFO] Client " + client.getSocket().getInetAddress() + " requested connection info.");
                 basicAnswer(client, generateClientInfo(client));
                 break;
-
             default:
                 switch (currentAction) {
-                    case "CONNECTING":
-                        initMessageAction(parsedMessage, client);
-                        break;
-                    case "READ":
-                        readPackageAction(parsedMessage, client);
-                        break;
-                    case "ADD":
-                        addPackageAction(parsedMessage, client);
-                        break;
-                    case "MODIFY":
-                        modifyPackageAction(parsedMessage, client);
-                        break;
-                    case "DELETE":
-                        deletePackageAction(parsedMessage, client);
-                        break;
+                    case "CONNECTING": initMessageAction(parsedMessage, client); break;
+                    case "READ": readPackageAction(parsedMessage, client); break;
+                    case "ADD": addPackageAction(parsedMessage, client); break;
+                    case "MODIFY": modifyPackageAction(parsedMessage, client); break;
+                    case "DELETE": deletePackageAction(parsedMessage, client); break;
                     default:
                         System.out.println("[WARN] Unknown stage for client: " + currentAction);
                 }
-                break;
         }
     }
 
-
-
     private void readPackageAction(List<String> parsedMessage, Client client) {
-        System.out.println("[DEBUG] readPackageAction received: " + parsedMessage);
-
         Map<String, String> args = DbUtils.parseArgs(parsedMessage);
         String packageCode = args.get("code");
         if (packageCode == null) {
@@ -118,9 +98,15 @@ public class ClientManager {
                             "i.item_estimated_delivery",
                             "i.item_entry_time",
                             "i.item_exit_time",
-                            "i.space_code"
+                            "i.space_code",
+                            "o.order_priority",
+                            "sa.user_email AS source_email",
+                            "da.user_email AS destination_email"
                     )
                     .join("INNER", "item i", "p.item_id = i.item_id")
+                    .join("LEFT", "\"order\" o", "i.item_id = o.order_id")
+                    .join("LEFT", "address sa", "o.source_address_id = sa.address_id")
+                    .join("LEFT", "address da", "o.destination_address_id = da.address_id")
                     .where("p.package_code = ?", packageCode)
                     .execute();
 
@@ -137,7 +123,10 @@ public class ClientManager {
                 sb.append("estimated_delivery=").append(rs.getDate("item_estimated_delivery")).append(", ");
                 sb.append("entry_time=").append(rs.getTimestamp("item_entry_time")).append(", ");
                 sb.append("exit_time=").append(rs.getTimestamp("item_exit_time")).append(", ");
-                sb.append("space_code=").append(rs.getString("space_code"));
+                sb.append("space_code=").append(rs.getString("space_code")).append(", ");
+                sb.append("order_priority=").append(rs.getInt("order_priority")).append(", ");
+                sb.append("source_email=").append(rs.getString("source_email")).append(", ");
+                sb.append("destination_email=").append(rs.getString("destination_email"));
 
                 basicAnswer(client, sb.toString());
             } else {
@@ -152,46 +141,28 @@ public class ClientManager {
         }
     }
 
+
     private void addPackageAction(List<String> parsedMessage, Client client) {
-        System.out.println("[DEBUG] addPackageAction received: " + parsedMessage);
-
         Map<String, String> args = DbUtils.parseArgs(parsedMessage);
-
-        System.out.println("[DEBUG] Parsed args:");
-        for (Map.Entry<String, String> entry : args.entrySet()) {
-            System.out.println("  " + entry.getKey() + " -> " + entry.getValue());
-        }
 
         String packageCode = args.get("code");
         String spaceCode = args.get("spacecode");
+        String sourceMail = args.get("source");
+        String destinationMail = args.get("destination");
+        String priorityStr = args.get("priority");
 
-        // Vérification existence des champs obligatoires
         if (packageCode == null || spaceCode == null) {
-            basicAnswer(client, "ERROR: package_code ou space_code manquant");
+            basicAnswer(client, "ERROR: code et spacecode obligatoires");
             disconnectClient(client, "FINISHED");
             return;
         }
 
-        // -------------------------------
-        //  VALIDATION DU POIDS OBLIGATOIRE
-        // -------------------------------
-        Double weight = null;
-
-        if (!args.containsKey("weight")) {
-            basicAnswer(client, "ERROR: weight manquant (doit être > 0)");
-            disconnectClient(client, "FINISHED");
-            return;
-        }
-
+        Double weight;
         try {
             weight = Double.parseDouble(args.get("weight"));
-            if (weight <= 0) {
-                basicAnswer(client, "ERROR: weight invalide (doit être > 0)");
-                disconnectClient(client, "FINISHED");
-                return;
-            }
-        } catch (NumberFormatException e) {
-            basicAnswer(client, "ERROR: weight non numérique");
+            if (weight <= 0) throw new Exception();
+        } catch (Exception e) {
+            basicAnswer(client, "ERROR: weight invalide ou non numérique");
             disconnectClient(client, "FINISHED");
             return;
         }
@@ -201,37 +172,33 @@ public class ClientManager {
         String statusStr = args.getOrDefault("status", "in_storage");
         String estimatedDeliveryStr = args.get("estimated_delivery");
         String exitTimeStr = args.get("exit_time");
+        int priority = (priorityStr == null ? 1 : Integer.parseInt(priorityStr));
 
         DatabaseManager db = DatabaseManager.getInstance();
 
         try {
+            // INSERT ITEM
             Map<String, Object> itemValues = new HashMap<>();
             itemValues.put("item_weight", weight);
 
-            PGobject pgStatus = new PGobject();
-            pgStatus.setType("item_status");
-            pgStatus.setValue(statusStr);
-            itemValues.put("item_status", pgStatus);
+            PGobject statusEnum = new PGobject();
+            statusEnum.setType("item_status");
+            statusEnum.setValue(statusStr);
+            itemValues.put("item_status", statusEnum);
 
-            // estimated_delivery
-            if (estimatedDeliveryStr == null || estimatedDeliveryStr.equalsIgnoreCase("null") || estimatedDeliveryStr.isEmpty()) {
-                itemValues.put("item_estimated_delivery", null);
-            } else {
-                itemValues.put("item_estimated_delivery", Date.valueOf(estimatedDeliveryStr));
-            }
+            itemValues.put("item_estimated_delivery",
+                    (estimatedDeliveryStr == null || estimatedDeliveryStr.equals("null") ? null : Date.valueOf(estimatedDeliveryStr))
+            );
 
-            // exit_time
-            if (exitTimeStr == null || exitTimeStr.equalsIgnoreCase("null") || exitTimeStr.isEmpty()) {
+            if (exitTimeStr == null || exitTimeStr.equalsIgnoreCase("null") || exitTimeStr.isEmpty())
                 itemValues.put("item_exit_time", null);
-            } else if (exitTimeStr.equalsIgnoreCase("now")) {
+            else if (exitTimeStr.equalsIgnoreCase("now"))
                 itemValues.put("item_exit_time", new Timestamp(System.currentTimeMillis()));
-            } else {
+            else
                 itemValues.put("item_exit_time", Timestamp.valueOf(exitTimeStr));
-            }
 
             itemValues.put("space_code", spaceCode);
 
-            // Insert item
             int itemRows = db.insert("item", itemValues);
             if (itemRows == 0) {
                 basicAnswer(client, "ERROR: échec création item");
@@ -246,7 +213,7 @@ public class ClientManager {
             long itemId = rsItem.next() ? rsItem.getLong("item_id") : 0;
             DatabaseManager.close(rsItem, null);
 
-            // Insert package
+            // INSERT PACKAGE
             Map<String, Object> packageValues = new HashMap<>();
             packageValues.put("package_code", packageCode);
             packageValues.put("package_refrigerated", refrigerated);
@@ -260,14 +227,40 @@ public class ClientManager {
                 return;
             }
 
-            ResultSet rsPkg = db.from("package")
-                    .select("package_id")
-                    .where("package_code = ?", packageCode)
-                    .execute();
-            long packageId = rsPkg.next() ? rsPkg.getLong("package_id") : -1;
-            DatabaseManager.close(rsPkg, null);
+            // INSERT ORDER si source et destination présents
+            if (sourceMail != null && destinationMail != null) {
+                try {
+                    ResultSet rsSource = db.from("address").select("address_id").where("user_email = ?", sourceMail).execute();
+                    ResultSet rsDest = db.from("address").select("address_id").where("user_email = ?", destinationMail).execute();
 
-            basicAnswer(client, "ALLOWED ADD (package_id=" + packageId + ")");
+                    long sourceId = rsSource.next() ? rsSource.getLong("address_id") : -1;
+                    long destinationId = rsDest.next() ? rsDest.getLong("address_id") : -1;
+
+                    DatabaseManager.close(rsSource, null);
+                    DatabaseManager.close(rsDest, null);
+
+                    if (sourceId != -1 && destinationId != -1) {
+                        if (sourceId != destinationId) {
+                            Map<String, Object> orderValues = new HashMap<>();
+                            orderValues.put("order_id", itemId);
+                            orderValues.put("order_priority", priority);
+                            orderValues.put("source_address_id", sourceId);
+                            orderValues.put("destination_address_id", destinationId);
+                            db.insert("\"order\"", orderValues);
+                        } else {
+                            basicAnswer(client, "WARNING: source = destination, order non créé");
+                        }
+                    } else {
+                        basicAnswer(client, "WARNING: impossible de trouver source ou destination par mail");
+                    }
+                } catch (Exception e) {
+                    basicAnswer(client, "WARNING: échec création order: " + e.getMessage());
+                }
+            } else {
+                basicAnswer(client, "WARNING: paquet créé sans order associé");
+            }
+
+            basicAnswer(client, "ALLOWED ADD (package_id=" + itemId + ")");
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
             e.printStackTrace();
@@ -278,8 +271,6 @@ public class ClientManager {
 
 
     private void modifyPackageAction(List<String> parsedMessage, Client client) {
-        System.out.println("[DEBUG] modifyPackageAction received: " + parsedMessage);
-
         Map<String, String> args = DbUtils.parseArgs(parsedMessage);
         String packageCode = args.get("code");
         if (packageCode == null) {
@@ -305,36 +296,98 @@ public class ClientManager {
             long itemId = rs.getLong("item_id");
             DatabaseManager.close(rs, null);
 
+            // UPDATE PACKAGE
             DatabaseManager.UpdateQuery pkgQuery = db.update("package").where("package_id = ?", packageId);
             if (args.containsKey("fragile")) pkgQuery.set("package_fragile", Boolean.parseBoolean(args.get("fragile")));
             if (args.containsKey("refrigerated")) pkgQuery.set("package_refrigerated", Boolean.parseBoolean(args.get("refrigerated")));
             pkgQuery.execute();
 
+            // UPDATE ITEM
             DatabaseManager.UpdateQuery itemQuery = db.update("item").where("item_id = ?", itemId);
             if (args.containsKey("weight")) itemQuery.set("item_weight", Double.parseDouble(args.get("weight")));
-            if (args.containsKey("status")) {
-                PGobject statusEnum = new PGobject();
-                statusEnum.setType("item_status");
-                statusEnum.setValue(args.get("status").equalsIgnoreCase("null") ? null : args.get("status"));
-                itemQuery.set("item_status", statusEnum);
-            }
-            if (args.containsKey("estimated_delivery")) {
-                String dateStr = args.get("estimated_delivery");
-                itemQuery.set("item_estimated_delivery",
-                        (dateStr == null || dateStr.equalsIgnoreCase("null") || dateStr.isEmpty()) ? null : Date.valueOf(dateStr));
-            }
-            if (args.containsKey("exit_time")) {
-                String tsStr = args.get("exit_time").trim();
-                if (tsStr.isEmpty() || tsStr.equalsIgnoreCase("null")) itemQuery.set("item_exit_time", null);
-                else if (tsStr.equalsIgnoreCase("now")) itemQuery.set("item_exit_time", new Timestamp(System.currentTimeMillis()));
-                else itemQuery.set("item_exit_time", Timestamp.valueOf(tsStr));
-            }
-            if (args.containsKey("spacecode")) itemQuery.set("space_code", args.get("spacecode"));
 
-            itemQuery.execute();
+            if (args.containsKey("status")) {
+                PGobject st = new PGobject();
+                st.setType("item_status");
+                st.setValue(args.get("status"));
+                itemQuery.set("item_status", st);
+            }
+
+            if (args.containsKey("estimated_delivery")) {
+                String d = args.get("estimated_delivery");
+                itemQuery.set("item_estimated_delivery",
+                        (d == null || d.isEmpty() || d.equalsIgnoreCase("null")) ? null : Date.valueOf(d));
+            }
+
+            if (args.containsKey("exit_time")) {
+                String ts = args.get("exit_time").trim();
+                if (ts.equalsIgnoreCase("now"))
+                    itemQuery.set("item_exit_time", new Timestamp(System.currentTimeMillis()));
+                else if (ts.isEmpty() || ts.equalsIgnoreCase("null"))
+                    itemQuery.set("item_exit_time", null);
+                else
+                    itemQuery.set("item_exit_time", Timestamp.valueOf(ts));
+            }
+
+            if (args.containsKey("spacecode"))
+                itemQuery.set("space_code", args.get("spacecode"));
+
+            itemQuery.execute(); // exécution indispensable
+
+            // UPDATE OR CREATE ORDER via mail
+            String sourceMail = args.get("source");
+            String destinationMail = args.get("destination");
+            boolean hasPriority = args.containsKey("priority");
+            int priority = (hasPriority ? Integer.parseInt(args.get("priority")) : 1);
+
+            if (sourceMail != null || destinationMail != null || hasPriority) {
+                long sourceId = -1;
+                long destId = -1;
+
+                try {
+                    if (sourceMail != null) {
+                        ResultSet rsSource = db.from("address").select("address_id").where("user_email = ?", sourceMail).execute();
+                        sourceId = rsSource.next() ? rsSource.getLong("address_id") : -1;
+                        DatabaseManager.close(rsSource, null);
+                    }
+                    if (destinationMail != null) {
+                        ResultSet rsDest = db.from("address").select("address_id").where("user_email = ?", destinationMail).execute();
+                        destId = rsDest.next() ? rsDest.getLong("address_id") : -1;
+                        DatabaseManager.close(rsDest, null);
+                    }
+
+                    ResultSet rsOrder = db.from("\"order\"").select("order_id").where("order_id = ?", itemId).execute();
+                    boolean orderExists = rsOrder.next();
+                    DatabaseManager.close(rsOrder, null);
+
+                    if (sourceId != -1 && destId != -1 && sourceId == destId) {
+                        basicAnswer(client, "WARNING: source = destination, order non modifié/créé");
+                    } else if (orderExists) {
+                        DatabaseManager.UpdateQuery orderQuery = db.update("\"order\"").where("order_id = ?", itemId);
+                        if (sourceId != -1) orderQuery.set("source_address_id", sourceId);
+                        if (destId != -1) orderQuery.set("destination_address_id", destId);
+                        if (hasPriority) orderQuery.set("order_priority", priority);
+                        orderQuery.execute();
+                    } else {
+                        if (sourceId != -1 && destId != -1) {
+                            Map<String, Object> orderValues = new HashMap<>();
+                            orderValues.put("order_id", itemId);
+                            orderValues.put("order_priority", priority);
+                            orderValues.put("source_address_id", sourceId);
+                            orderValues.put("destination_address_id", destId);
+                            db.insert("\"order\"", orderValues);
+                        } else {
+                            basicAnswer(client, "WARNING: source ou destination invalide, order non créé");
+                        }
+                    }
+                } catch (Exception e) {
+                    basicAnswer(client, "WARNING: échec récupération ou modification order: " + e.getMessage());
+                }
+            } else {
+                basicAnswer(client, "WARNING: paquet modifié sans order associé");
+            }
 
             basicAnswer(client, "ALLOWED MODIFY (package_id=" + packageId + ")");
-            System.out.println("[INFO] Package modifié : " + packageCode + " (ID=" + packageId + ")");
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
             e.printStackTrace();
@@ -342,6 +395,7 @@ public class ClientManager {
             disconnectClient(client, "FINISHED");
         }
     }
+
 
     private void deletePackageAction(List<String> parsedMessage, Client client) {
         System.out.println("[DEBUG] deletePackageAction received: " + parsedMessage);
