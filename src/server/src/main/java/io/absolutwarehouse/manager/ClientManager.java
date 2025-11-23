@@ -91,277 +91,14 @@ public class ClientManager {
 
 
 
-    private void modifyPackageAction(List<String> parsedMessage, Client client) {
-        System.out.println("[DEBUG] modifyPackageAction received: " + parsedMessage);
-
-        Map<String, String> args = DbUtils.parseArgs(parsedMessage);
-
-        String packageCode = args.get("code");
-        if (packageCode == null) {
-            basicAnswer(client, "ERROR: package_code manquant");
-            resetEtape(client);
-            return;
-        }
-
-        DatabaseManager db = DatabaseManager.getInstance();
-
-        try {
-            // 1) Récupérer package et item associé
-            ResultSet rs = db.from("package")
-                    .select("package_id, item_id")
-                    .where("package_code = ?", packageCode)
-                    .execute();
-
-            if (!rs.next()) {
-                basicAnswer(client, "ERROR: package introuvable");
-                return;
-            }
-
-            long packageId = rs.getLong("package_id");
-            long itemId = rs.getLong("item_id");
-            DatabaseManager.close(rs, null);
-
-            // 2) Modifier package
-            DatabaseManager.UpdateQuery pkgQuery = db.update("package").where("package_id = ?", packageId);
-            if (args.containsKey("fragile")) pkgQuery.set("package_fragile", Boolean.parseBoolean(args.get("fragile")));
-            if (args.containsKey("refrigerated")) pkgQuery.set("package_refrigerated", Boolean.parseBoolean(args.get("refrigerated")));
-            pkgQuery.execute();
-
-            // 3) Modifier item
-            DatabaseManager.UpdateQuery itemQuery = db.update("item").where("item_id = ?", itemId);
-
-            if (args.containsKey("weight")) {
-                itemQuery.set("item_weight", Double.parseDouble(args.get("weight")));
-            }
-
-            if (args.containsKey("status")) {
-                String statusStr = args.get("status");
-                PGobject statusEnum = new PGobject();
-                statusEnum.setType("item_status");
-                statusEnum.setValue(statusStr.equalsIgnoreCase("null") ? null : statusStr);
-                itemQuery.set("item_status", statusEnum);
-            }
-
-            if (args.containsKey("estimated_delivery")) {
-                String dateStr = args.get("estimated_delivery");
-                if (dateStr == null || dateStr.equalsIgnoreCase("null") || dateStr.isEmpty()) {
-                    itemQuery.set("item_estimated_delivery", null);
-                } else {
-                    Date sqlDate = Date.valueOf(dateStr); // yyyy-MM-dd
-                    itemQuery.set("item_estimated_delivery", sqlDate);
-                }
-            }
-
-            if (args.containsKey("exit_time")) {
-                String tsStr = args.get("exit_time").trim();
-                if (tsStr.isEmpty() || tsStr.equalsIgnoreCase("null")) {
-                    itemQuery.set("item_exit_time", null);
-                } else if (tsStr.equalsIgnoreCase("now")) {
-                    itemQuery.set("item_exit_time", new Timestamp(System.currentTimeMillis()));
-                } else {
-                    try {
-                        Timestamp sqlTs = Timestamp.valueOf(tsStr); // yyyy-MM-dd HH:mm:ss
-                        itemQuery.set("item_exit_time", sqlTs);
-                    } catch (IllegalArgumentException ex) {
-                        basicAnswer(client, "ERROR: format exit_time invalide, attendu yyyy-MM-dd HH:mm:ss");
-                        resetEtape(client);
-                        return;
-                    }
-                }
-            }
-
-            if (args.containsKey("spacecode")) {
-                itemQuery.set("space_code", args.get("spacecode"));
-            }
-
-            itemQuery.execute();
-
-            basicAnswer(client, "ALLOWED MODIFY (package_id=" + packageId + ")");
-            System.out.println("[INFO] Package modifié : " + packageCode + " (ID=" + packageId + ")");
-
-        } catch (SQLException e) {
-            basicAnswer(client, "ERROR: " + e.getMessage());
-            e.printStackTrace();
-        } finally {
-            resetEtape(client);
-        }
-    }
-
-
-
-
-    private void addPackageAction(List<String> parsedMessage, Client client) {
-        System.out.println("[DEBUG] addPackageAction received: " + parsedMessage);
-
-        Map<String, String> args = DbUtils.parseArgs(parsedMessage);
-
-        String packageCode = args.get("code");
-        String spaceCode = args.get("spacecode");
-
-        if (packageCode == null) {
-            basicAnswer(client, "ERROR: package_code manquant");
-            resetEtape(client);
-            return;
-        }
-        if (spaceCode == null) {
-            basicAnswer(client, "ERROR: space_code manquant");
-            resetEtape(client);
-            return;
-        }
-
-        boolean fragile = Boolean.parseBoolean(args.getOrDefault("fragile", "false"));
-        boolean refrigerated = Boolean.parseBoolean(args.getOrDefault("refrigerated", "false"));
-        Double weight = args.containsKey("weight") ? Double.parseDouble(args.get("weight")) : 0.0;
-        String statusStr = args.getOrDefault("status", "in_storage");
-        String estimatedDeliveryStr = args.get("estimated_delivery");
-        String exitTimeStr = args.get("exit_time");
-
-        DatabaseManager db = DatabaseManager.getInstance();
-
-        try {
-            // -------------------
-            // 1) Créer l'item
-            // -------------------
-            Map<String, Object> itemValues = new HashMap<>();
-            itemValues.put("item_weight", weight);
-
-            PGobject pgStatus = new PGobject();
-            pgStatus.setType("item_status");
-            pgStatus.setValue(statusStr);
-            itemValues.put("item_status", pgStatus);
-
-            // Traiter estimated_delivery (DATE)
-            if (estimatedDeliveryStr == null || estimatedDeliveryStr.equalsIgnoreCase("null") || estimatedDeliveryStr.isEmpty()) {
-                itemValues.put("item_estimated_delivery", null);
-            } else {
-                itemValues.put("item_estimated_delivery", Date.valueOf(estimatedDeliveryStr));
-            }
-
-            // Traiter exit_time (TIMESTAMP)
-            if (exitTimeStr == null || exitTimeStr.equalsIgnoreCase("null") || exitTimeStr.isEmpty()) {
-                itemValues.put("item_exit_time", null);
-            } else if (exitTimeStr.equalsIgnoreCase("now")) {
-                itemValues.put("item_exit_time", new Timestamp(System.currentTimeMillis()));
-            } else {
-                itemValues.put("item_exit_time", Timestamp.valueOf(exitTimeStr));
-            }
-
-            itemValues.put("space_code", spaceCode);
-
-            int itemRows = db.insert("item", itemValues);
-            if (itemRows == 0) {
-                basicAnswer(client, "ERROR: échec création item");
-                resetEtape(client);
-                return;
-            }
-
-            // Récupérer l'ID de l'item
-            ResultSet rsItem = db.from("item")
-                    .select("item_id")
-                    .where("space_code = ? ORDER BY item_entry_time DESC LIMIT 1", spaceCode)
-                    .execute();
-            long itemId = rsItem.next() ? rsItem.getLong("item_id") : 0;
-            DatabaseManager.close(rsItem, null);
-
-            // -------------------
-            // 2) Créer le package
-            // -------------------
-            Map<String, Object> packageValues = new HashMap<>();
-            packageValues.put("package_code", packageCode);
-            packageValues.put("package_refrigerated", refrigerated);
-            packageValues.put("package_fragile", fragile);
-            packageValues.put("item_id", itemId);
-
-            int pkgRows = db.insert("package", packageValues);
-            if (pkgRows == 0) {
-                basicAnswer(client, "ERROR: échec ajout package");
-                resetEtape(client);
-                return;
-            }
-
-            ResultSet rsPkg = db.from("package")
-                    .select("package_id")
-                    .where("package_code = ?", packageCode)
-                    .execute();
-            long packageId = rsPkg.next() ? rsPkg.getLong("package_id") : -1;
-            DatabaseManager.close(rsPkg, null);
-
-            basicAnswer(client, "ALLOWED ADD (package_id=" + packageId + ")");
-            System.out.println("[INFO] Package ajouté : " + packageCode + " (ID=" + packageId + ")");
-
-        } catch (SQLException e) {
-            basicAnswer(client, "ERROR: " + e.getMessage());
-            e.printStackTrace();
-        } finally {
-            resetEtape(client);
-        }
-    }
-
-
-
-    private void deletePackageAction(List<String> parsedMessage, Client client) {
-        System.out.println("[DEBUG] deletePackageAction received: " + parsedMessage);
-
-        // Parse les arguments en Map clé/valeur
-        Map<String, String> args = DbUtils.parseArgs(parsedMessage);
-
-        String packageCode = args.get("code");
-        if (packageCode == null) {
-            basicAnswer(client, "ERROR: package_code manquant");
-            resetEtape(client);
-            return;
-        }
-
-        DatabaseManager db = DatabaseManager.getInstance();
-        ResultSet rs = null;
-
-        try {
-            // Vérifier que le package existe
-            rs = db.from("package")
-                    .select("package_id, item_id")
-                    .where("package_code = ?", packageCode)
-                    .execute();
-
-            if (!rs.next()) {
-                basicAnswer(client, "ERROR: package introuvable");
-                return;
-            }
-
-            long packageId = rs.getLong("package_id");
-            long itemId = rs.getLong("item_id");
-            DatabaseManager.close(rs, null);
-
-            // Supprimer le package
-            int rows = db.deleteFrom("package")
-                    .where("package_id = ?", packageId)
-                    .execute();
-
-            if (rows > 0) {
-                basicAnswer(client, "CONFIRMED DELETE (package_id=" + packageId + ", item_id=" + itemId + ")");
-                System.out.println("[INFO] Package supprimé : " + packageCode + " (ID=" + packageId + ")");
-            } else {
-                basicAnswer(client, "ERROR: échec suppression package");
-            }
-
-        } catch (SQLException e) {
-            basicAnswer(client, "ERROR: " + e.getMessage());
-        } finally {
-            resetEtape(client);
-        }
-    }
-
-
-
     private void readPackageAction(List<String> parsedMessage, Client client) {
         System.out.println("[DEBUG] readPackageAction received: " + parsedMessage);
 
-        // Parse les arguments en Map clé/valeur
         Map<String, String> args = DbUtils.parseArgs(parsedMessage);
-
         String packageCode = args.get("code");
         if (packageCode == null) {
             basicAnswer(client, "ERROR: package_code manquant");
-            resetEtape(client);
+            disconnectClient(client, "FINISHED");
             return;
         }
 
@@ -369,7 +106,6 @@ public class ClientManager {
         ResultSet rs = null;
 
         try {
-            // Requête avec jointure package ↔ item
             rs = db.from("package p")
                     .select(
                             "p.package_id",
@@ -407,14 +143,254 @@ public class ClientManager {
             } else {
                 basicAnswer(client, "ERROR: package introuvable");
             }
+        } catch (SQLException e) {
+            basicAnswer(client, "ERROR: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            DatabaseManager.close(rs, null);
+            disconnectClient(client, "FINISHED");
+        }
+    }
 
+    private void addPackageAction(List<String> parsedMessage, Client client) {
+        System.out.println("[DEBUG] addPackageAction received: " + parsedMessage);
+
+        Map<String, String> args = DbUtils.parseArgs(parsedMessage);
+
+        System.out.println("[DEBUG] Parsed args:");
+        for (Map.Entry<String, String> entry : args.entrySet()) {
+            System.out.println("  " + entry.getKey() + " -> " + entry.getValue());
+        }
+
+        String packageCode = args.get("code");
+        String spaceCode = args.get("spacecode");
+
+        // Vérification existence des champs obligatoires
+        if (packageCode == null || spaceCode == null) {
+            basicAnswer(client, "ERROR: package_code ou space_code manquant");
+            disconnectClient(client, "FINISHED");
+            return;
+        }
+
+        // -------------------------------
+        //  VALIDATION DU POIDS OBLIGATOIRE
+        // -------------------------------
+        Double weight = null;
+
+        if (!args.containsKey("weight")) {
+            basicAnswer(client, "ERROR: weight manquant (doit être > 0)");
+            disconnectClient(client, "FINISHED");
+            return;
+        }
+
+        try {
+            weight = Double.parseDouble(args.get("weight"));
+            if (weight <= 0) {
+                basicAnswer(client, "ERROR: weight invalide (doit être > 0)");
+                disconnectClient(client, "FINISHED");
+                return;
+            }
+        } catch (NumberFormatException e) {
+            basicAnswer(client, "ERROR: weight non numérique");
+            disconnectClient(client, "FINISHED");
+            return;
+        }
+
+        boolean fragile = Boolean.parseBoolean(args.getOrDefault("fragile", "false"));
+        boolean refrigerated = Boolean.parseBoolean(args.getOrDefault("refrigerated", "false"));
+        String statusStr = args.getOrDefault("status", "in_storage");
+        String estimatedDeliveryStr = args.get("estimated_delivery");
+        String exitTimeStr = args.get("exit_time");
+
+        DatabaseManager db = DatabaseManager.getInstance();
+
+        try {
+            Map<String, Object> itemValues = new HashMap<>();
+            itemValues.put("item_weight", weight);
+
+            PGobject pgStatus = new PGobject();
+            pgStatus.setType("item_status");
+            pgStatus.setValue(statusStr);
+            itemValues.put("item_status", pgStatus);
+
+            // estimated_delivery
+            if (estimatedDeliveryStr == null || estimatedDeliveryStr.equalsIgnoreCase("null") || estimatedDeliveryStr.isEmpty()) {
+                itemValues.put("item_estimated_delivery", null);
+            } else {
+                itemValues.put("item_estimated_delivery", Date.valueOf(estimatedDeliveryStr));
+            }
+
+            // exit_time
+            if (exitTimeStr == null || exitTimeStr.equalsIgnoreCase("null") || exitTimeStr.isEmpty()) {
+                itemValues.put("item_exit_time", null);
+            } else if (exitTimeStr.equalsIgnoreCase("now")) {
+                itemValues.put("item_exit_time", new Timestamp(System.currentTimeMillis()));
+            } else {
+                itemValues.put("item_exit_time", Timestamp.valueOf(exitTimeStr));
+            }
+
+            itemValues.put("space_code", spaceCode);
+
+            // Insert item
+            int itemRows = db.insert("item", itemValues);
+            if (itemRows == 0) {
+                basicAnswer(client, "ERROR: échec création item");
+                disconnectClient(client, "FINISHED");
+                return;
+            }
+
+            ResultSet rsItem = db.from("item")
+                    .select("item_id")
+                    .where("space_code = ? ORDER BY item_entry_time DESC LIMIT 1", spaceCode)
+                    .execute();
+            long itemId = rsItem.next() ? rsItem.getLong("item_id") : 0;
+            DatabaseManager.close(rsItem, null);
+
+            // Insert package
+            Map<String, Object> packageValues = new HashMap<>();
+            packageValues.put("package_code", packageCode);
+            packageValues.put("package_refrigerated", refrigerated);
+            packageValues.put("package_fragile", fragile);
+            packageValues.put("item_id", itemId);
+
+            int pkgRows = db.insert("package", packageValues);
+            if (pkgRows == 0) {
+                basicAnswer(client, "ERROR: échec ajout package");
+                disconnectClient(client, "FINISHED");
+                return;
+            }
+
+            ResultSet rsPkg = db.from("package")
+                    .select("package_id")
+                    .where("package_code = ?", packageCode)
+                    .execute();
+            long packageId = rsPkg.next() ? rsPkg.getLong("package_id") : -1;
+            DatabaseManager.close(rsPkg, null);
+
+            basicAnswer(client, "ALLOWED ADD (package_id=" + packageId + ")");
+        } catch (SQLException e) {
+            basicAnswer(client, "ERROR: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            disconnectClient(client, "FINISHED");
+        }
+    }
+
+
+    private void modifyPackageAction(List<String> parsedMessage, Client client) {
+        System.out.println("[DEBUG] modifyPackageAction received: " + parsedMessage);
+
+        Map<String, String> args = DbUtils.parseArgs(parsedMessage);
+        String packageCode = args.get("code");
+        if (packageCode == null) {
+            basicAnswer(client, "ERROR: package_code manquant");
+            disconnectClient(client, "FINISHED");
+            return;
+        }
+
+        DatabaseManager db = DatabaseManager.getInstance();
+        try {
+            ResultSet rs = db.from("package")
+                    .select("package_id, item_id")
+                    .where("package_code = ?", packageCode)
+                    .execute();
+
+            if (!rs.next()) {
+                basicAnswer(client, "ERROR: package introuvable");
+                disconnectClient(client, "FINISHED");
+                return;
+            }
+
+            long packageId = rs.getLong("package_id");
+            long itemId = rs.getLong("item_id");
+            DatabaseManager.close(rs, null);
+
+            DatabaseManager.UpdateQuery pkgQuery = db.update("package").where("package_id = ?", packageId);
+            if (args.containsKey("fragile")) pkgQuery.set("package_fragile", Boolean.parseBoolean(args.get("fragile")));
+            if (args.containsKey("refrigerated")) pkgQuery.set("package_refrigerated", Boolean.parseBoolean(args.get("refrigerated")));
+            pkgQuery.execute();
+
+            DatabaseManager.UpdateQuery itemQuery = db.update("item").where("item_id = ?", itemId);
+            if (args.containsKey("weight")) itemQuery.set("item_weight", Double.parseDouble(args.get("weight")));
+            if (args.containsKey("status")) {
+                PGobject statusEnum = new PGobject();
+                statusEnum.setType("item_status");
+                statusEnum.setValue(args.get("status").equalsIgnoreCase("null") ? null : args.get("status"));
+                itemQuery.set("item_status", statusEnum);
+            }
+            if (args.containsKey("estimated_delivery")) {
+                String dateStr = args.get("estimated_delivery");
+                itemQuery.set("item_estimated_delivery",
+                        (dateStr == null || dateStr.equalsIgnoreCase("null") || dateStr.isEmpty()) ? null : Date.valueOf(dateStr));
+            }
+            if (args.containsKey("exit_time")) {
+                String tsStr = args.get("exit_time").trim();
+                if (tsStr.isEmpty() || tsStr.equalsIgnoreCase("null")) itemQuery.set("item_exit_time", null);
+                else if (tsStr.equalsIgnoreCase("now")) itemQuery.set("item_exit_time", new Timestamp(System.currentTimeMillis()));
+                else itemQuery.set("item_exit_time", Timestamp.valueOf(tsStr));
+            }
+            if (args.containsKey("spacecode")) itemQuery.set("space_code", args.get("spacecode"));
+
+            itemQuery.execute();
+
+            basicAnswer(client, "ALLOWED MODIFY (package_id=" + packageId + ")");
+            System.out.println("[INFO] Package modifié : " + packageCode + " (ID=" + packageId + ")");
+        } catch (SQLException e) {
+            basicAnswer(client, "ERROR: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            disconnectClient(client, "FINISHED");
+        }
+    }
+
+    private void deletePackageAction(List<String> parsedMessage, Client client) {
+        System.out.println("[DEBUG] deletePackageAction received: " + parsedMessage);
+
+        Map<String, String> args = DbUtils.parseArgs(parsedMessage);
+        String packageCode = args.get("code");
+        if (packageCode == null) {
+            basicAnswer(client, "ERROR: package_code manquant");
+            disconnectClient(client, "FINISHED");
+            return;
+        }
+
+        DatabaseManager db = DatabaseManager.getInstance();
+        ResultSet rs = null;
+
+        try {
+            rs = db.from("package")
+                    .select("package_id, item_id")
+                    .where("package_code = ?", packageCode)
+                    .execute();
+
+            if (!rs.next()) {
+                basicAnswer(client, "ERROR: package introuvable");
+                disconnectClient(client, "FINISHED");
+                return;
+            }
+
+            long packageId = rs.getLong("package_id");
+            long itemId = rs.getLong("item_id");
+            DatabaseManager.close(rs, null);
+
+            int rows = db.deleteFrom("package")
+                    .where("package_id = ?", packageId)
+                    .execute();
+
+            if (rows > 0) {
+                basicAnswer(client, "CONFIRMED DELETE (package_id=" + packageId + ", item_id=" + itemId + ")");
+                System.out.println("[INFO] Package supprimé : " + packageCode + " (ID=" + packageId + ")");
+            } else {
+                basicAnswer(client, "ERROR: échec suppression package");
+            }
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
         } finally {
-            DatabaseManager.close(rs, null);
-            resetEtape(client);
+            disconnectClient(client, "FINISHED");
         }
     }
+
+
 
 
 
