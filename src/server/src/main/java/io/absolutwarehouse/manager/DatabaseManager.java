@@ -19,7 +19,7 @@ public class DatabaseManager {
             Class.forName("org.postgresql.Driver");
 
             String url = String.format(
-                    "jdbc:postgresql://%s:%d/%s", 
+                    "jdbc:postgresql://%s:%d/%s",
                     ServerConfig.DB_HOSTNAME,
                     ServerConfig.DB_PORT,
                     ServerConfig.DB_NAME
@@ -33,9 +33,12 @@ public class DatabaseManager {
 
             System.out.println("[DatabaseManager] ✅ Connexion PostgreSQL établie !");
         } catch (Exception e) {
-            System.err.println("[DatabaseManager] ❌ Erreur : " + e.getMessage());
+            System.err.println("[DatabaseManager] ❌ ERREUR CRITIQUE : Impossible de se connecter à PostgreSQL.");
+            System.err.println("Cause : " + e.getMessage());
+            throw new RuntimeException("Impossible d'initialiser DatabaseManager", e);
         }
     }
+
 
     public static DatabaseManager getInstance() {
         if (instance == null) instance = new DatabaseManager();

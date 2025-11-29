@@ -263,7 +263,7 @@ public class ClientManager {
             basicAnswer(client, "ALLOWED ADD (package_id=" + itemId + ")");
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
-            e.printStackTrace();
+            //e.printStackTrace();
         } finally {
             disconnectClient(client, "FINISHED");
         }

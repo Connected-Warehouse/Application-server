@@ -32,7 +32,6 @@ public class SocketServer implements Runnable {
     @Override
     public void run() {
         try {
-            printServerInfo();
             serverSocket = new ServerSocket(port, ServerConfig.MAX_CONCURRENT_CONNECTIONS, address);
             serverSocket.setReceiveBufferSize(ServerConfig.MAX_BUFFER_SIZE);
             running = true;
