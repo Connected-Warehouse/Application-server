@@ -2,6 +2,7 @@ package io.absolutwarehouse.manager;
 
 import io.absolutwarehouse.config.ActionConfig;
 import io.absolutwarehouse.network.Client;
+import io.absolutwarehouse.utils.AppLogger;
 import io.absolutwarehouse.utils.DbUtils;
 
 import java.io.BufferedWriter;
@@ -59,14 +60,25 @@ public class ClientManager {
                 break;
             case "INFO":
                 basicAnswer(client, generateClientInfo(client));
+                AppLogger.info("Client is asking for informations :" + client.getSocket().getInetAddress());
                 break;
             default:
                 switch (currentAction) {
-                    case "CONNECTING": initMessageAction(parsedMessage, client); break;
-                    case "READ": readPackageAction(parsedMessage, client); break;
-                    case "ADD": addPackageAction(parsedMessage, client); break;
-                    case "MODIFY": modifyPackageAction(parsedMessage, client); break;
-                    case "DELETE": deletePackageAction(parsedMessage, client); break;
+                    case "CONNECTING": initMessageAction(parsedMessage, client);
+                        AppLogger.info("Client is trying to connect:" + client.getSocket().getInetAddress());
+                        break;
+                    case "READ": readPackageAction(parsedMessage, client);
+                        AppLogger.info("Client is trying to read a package:" + client.getSocket().getInetAddress());
+                        break;
+                    case "ADD": addPackageAction(parsedMessage, client);
+                        AppLogger.info("Client is trying to add a package:" + client.getSocket().getInetAddress());
+                        break;
+                    case "MODIFY": modifyPackageAction(parsedMessage, client);
+                        AppLogger.info("Client is trying to modify a package:" + client.getSocket().getInetAddress());
+                        break;
+                    case "DELETE": deletePackageAction(parsedMessage, client);
+                        AppLogger.info("Client is trying to delete a package:" + client.getSocket().getInetAddress());
+                        break;
                     default:
                         System.out.println("[WARN] Unknown stage for client: " + currentAction);
                 }
@@ -78,6 +90,7 @@ public class ClientManager {
         String packageCode = args.get("code");
         if (packageCode == null) {
             basicAnswer(client, "ERROR: package_code manquant");
+            AppLogger.error("package_code manquant");
             disconnectClient(client, "FINISHED");
             return;
         }
@@ -131,9 +144,11 @@ public class ClientManager {
                 basicAnswer(client, sb.toString());
             } else {
                 basicAnswer(client, "ERROR: package introuvable");
+                AppLogger.error("package introuvable");
             }
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
+            AppLogger.error("SQL Exception: " + e.getMessage());
             e.printStackTrace();
         } finally {
             DatabaseManager.close(rs, null);
@@ -153,6 +168,7 @@ public class ClientManager {
 
         if (packageCode == null || spaceCode == null) {
             basicAnswer(client, "ERROR: code et spacecode obligatoires");
+            AppLogger.error("code et spacecode obligatoires");
             disconnectClient(client, "FINISHED");
             return;
         }
@@ -163,6 +179,7 @@ public class ClientManager {
             if (weight <= 0) throw new Exception();
         } catch (Exception e) {
             basicAnswer(client, "ERROR: weight invalide ou non numérique");
+            AppLogger.error("weight invalide");
             disconnectClient(client, "FINISHED");
             return;
         }
@@ -249,20 +266,25 @@ public class ClientManager {
                             db.insert("\"order\"", orderValues);
                         } else {
                             basicAnswer(client, "WARNING: source = destination, order non créé");
+                            AppLogger.warn("Order non créé");
                         }
                     } else {
                         basicAnswer(client, "WARNING: impossible de trouver source ou destination par mail");
+                        AppLogger.warn("Order non créé, mail invalide");
                     }
                 } catch (Exception e) {
                     basicAnswer(client, "WARNING: échec création order: " + e.getMessage());
+                    AppLogger.warn("Order non créé");
                 }
             } else {
                 basicAnswer(client, "WARNING: paquet créé sans order associé");
+                AppLogger.warn("Order non créé");
             }
 
             basicAnswer(client, "ALLOWED ADD (package_id=" + itemId + ")");
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
+            AppLogger.error("SQL Exception: " + e.getMessage());
             //e.printStackTrace();
         } finally {
             disconnectClient(client, "FINISHED");
@@ -275,6 +297,7 @@ public class ClientManager {
         String packageCode = args.get("code");
         if (packageCode == null) {
             basicAnswer(client, "ERROR: package_code manquant");
+            AppLogger.error("package_code manquant");
             disconnectClient(client, "FINISHED");
             return;
         }
@@ -289,6 +312,7 @@ public class ClientManager {
             if (!rs.next()) {
                 basicAnswer(client, "ERROR: package introuvable");
                 disconnectClient(client, "FINISHED");
+                AppLogger.error("package introuvable");
                 return;
             }
 
@@ -378,18 +402,22 @@ public class ClientManager {
                             db.insert("\"order\"", orderValues);
                         } else {
                             basicAnswer(client, "WARNING: source ou destination invalide, order non créé");
+                            AppLogger.warn("ERROR: source ou destination invalide");
                         }
                     }
                 } catch (Exception e) {
                     basicAnswer(client, "WARNING: échec récupération ou modification order: " + e.getMessage());
+                    AppLogger.warn("échec récupération ou modification order: " + e.getMessage());
                 }
             } else {
                 basicAnswer(client, "WARNING: paquet modifié sans order associé");
+                AppLogger.warn("paquet modifié sans order associé");
             }
 
             basicAnswer(client, "ALLOWED MODIFY (package_id=" + packageId + ")");
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
+            AppLogger.error("ERROR: " + e.getMessage());
             e.printStackTrace();
         } finally {
             disconnectClient(client, "FINISHED");
@@ -404,6 +432,7 @@ public class ClientManager {
         String packageCode = args.get("code");
         if (packageCode == null) {
             basicAnswer(client, "ERROR: package_code manquant");
+            AppLogger.error("ERROR: package_code manquant");
             disconnectClient(client, "FINISHED");
             return;
         }
@@ -434,11 +463,14 @@ public class ClientManager {
             if (rows > 0) {
                 basicAnswer(client, "CONFIRMED DELETE (package_id=" + packageId + ", item_id=" + itemId + ")");
                 System.out.println("[INFO] Package supprimé : " + packageCode + " (ID=" + packageId + ")");
+                AppLogger.info("Package supprimé : " + packageCode + " (ID=" + packageId + ")");
             } else {
                 basicAnswer(client, "ERROR: échec suppression package");
+                AppLogger.warn("Package non supprimé");
             }
         } catch (SQLException e) {
             basicAnswer(client, "ERROR: " + e.getMessage());
+            AppLogger.error("ERROR: " + e.getMessage());
         } finally {
             disconnectClient(client, "FINISHED");
         }
@@ -459,6 +491,7 @@ public class ClientManager {
 
         if (parsedMessage.size() != 2) {
             disconnectClient(client, "BAD FORMAT.\nEXPECTED: 'INSTRUCTION' TERMINAL_ID \nRECEIVED: " + String.join(" ", parsedMessage));
+            AppLogger.warn("Client sent an abnormal format for actions :" + client.getSocket().getInetAddress());
             return;
         }
 
@@ -487,10 +520,12 @@ public class ClientManager {
                 client.setCurrentAction("CONNECTING");
                 basicAnswer(client, "UNKNOWN ACTION!");
                 System.out.println("[WARN] Unknown action received: " + action);
+                AppLogger.warn("Client sent an abnormal action :" + client.getSocket().getInetAddress()+", Action: " + action);
                 return;
         }
         basicAnswer(client, "ALLOWED");
         System.out.println("[INFO] Action allowed for client " + terminal + ": " + action);
+        AppLogger.info("Action allowed for client " + terminal + ": " + action);
     }
 
 

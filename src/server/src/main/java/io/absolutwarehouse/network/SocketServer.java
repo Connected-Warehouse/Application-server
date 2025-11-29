@@ -3,6 +3,7 @@ package io.absolutwarehouse.network;
 import io.absolutwarehouse.config.ServerConfig;
 import io.absolutwarehouse.manager.DatabaseManager;
 import io.absolutwarehouse.network.listener.ClientListener;
+import io.absolutwarehouse.utils.AppLogger;
 
 import java.io.*;
 import java.net.*;
@@ -87,6 +88,7 @@ public class SocketServer implements Runnable {
 
             if (listener != null) listener.onClientConnected(client);
             System.out.println("[INFO] New client connected: " + socket.getInetAddress());
+            AppLogger.info("New client connected: " + socket.getInetAddress());
 
             new Thread(() -> handleClient(client), "ClientThread-" + socket.getInetAddress()).start();
         }
@@ -109,6 +111,7 @@ public class SocketServer implements Runnable {
 
                     client.updateLastRequest();
                     System.out.println("[RECEIVED] From " + socket.getInetAddress() + ": " + msg);
+                    AppLogger.info("Received command from " + socket.getInetAddress() + ": " + msg);
 
                     if (listener != null) listener.onReceived(client, msg);
                 } else {
@@ -155,7 +158,7 @@ public class SocketServer implements Runnable {
         }
 
         removeClient(client);
-        if (listener != null) listener.onClientDisconnected(client);
+        //if (listener != null) listener.onClientDisconnected(client);
 
         try {
             socket.close();

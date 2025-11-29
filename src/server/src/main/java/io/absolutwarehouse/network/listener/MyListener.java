@@ -2,6 +2,7 @@ package io.absolutwarehouse.network.listener;
 
 import io.absolutwarehouse.manager.ClientManager;
 import io.absolutwarehouse.network.Client;
+import io.absolutwarehouse.utils.AppLogger;
 
 public class MyListener implements ClientListener {
 
@@ -21,6 +22,7 @@ public class MyListener implements ClientListener {
         System.out.println("Client disconnected : " + client.getSocket().getInetAddress());
         client.setConnected(false);  // met à jour l’état du client
         ClientManager.getInstance().resetEtape(client);
+        AppLogger.info("Client disconnected: " + client.getSocket().getInetAddress());
     }
 
     @Override
