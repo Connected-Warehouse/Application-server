@@ -8,18 +8,18 @@ public class MyListener implements ClientListener {
 
     @Override
     public void onClientConnected(Client client) {
-        System.out.println("Client connected : " + client.getSocket().getInetAddress());
+        //System.out.println("Client connected : " + client.getSocket().getInetAddress());
     }
 
     @Override
     public void onReceived(Client client, String message) {
-        System.out.println("Message received from " + client.getSocket().getInetAddress() + " : " + message);
+        //System.out.println("Message received from " + client.getSocket().getInetAddress() + " : " + message);
         ClientManager.getInstance().handleMessage(client, message);
     }
 
     @Override
     public void onClientDisconnected(Client client) {
-        System.out.println("Client disconnected : " + client.getSocket().getInetAddress());
+        //System.out.println("Client disconnected : " + client.getSocket().getInetAddress());
         client.setConnected(false);  // met à jour l’état du client
         ClientManager.getInstance().resetEtape(client);
         AppLogger.info("Client disconnected: " + client.getSocket().getInetAddress());

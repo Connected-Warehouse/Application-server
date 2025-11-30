@@ -16,8 +16,13 @@ public class Main {
 
             System.out.println("[INFO] Loading config file: " + configPath);
 
-            // ➤ Charge les valeurs dans ServerConfig
-            ServerConfig.loadFromFile(configPath);
+            try {
+                // ➤ Charge les valeurs dans ServerConfig
+                ServerConfig.loadFromFile(configPath);
+            } catch (Exception e) {
+                System.out.println("[ERROR] Failed to load config file: " + configPath);
+                System.out.println("Loading base config...");
+            }
 
             // ➤ Charge config des actions
             ActionConfig.loadConfig();

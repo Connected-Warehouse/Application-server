@@ -535,6 +535,12 @@ public class ClientManager {
     public void basicAnswer(Client client, String message) {
         if (client == null || !client.isConnected()) return;
 
+         /*try {
+            Thread.sleep(2000*100);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }*/
+
         try {
             BufferedWriter out = new BufferedWriter(new OutputStreamWriter(client.getSocket().getOutputStream()));
             out.write(message);
